@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>クローズチャットchatApp</title>
+
+</head>
+
+<body>
+  <h1>ほぼリアルタイムのチャット</h1>
+  <!-- 入力場所を作成しよう -->
+  <form>
+    <fieldset id="account">
+      <legend>アカウント処理</legend>
+      <div>
+        メールアドレス: <input type="email" id="email">
+      </div>
+      <div>
+        パスワード: <input type="password" id="password">
+      </div>
+      <div>
+        <button type="button" id="register">新規登録</button>
+        <button type="button" id="login">ログイン</button>
+        <button type="button" id="logout">ログオフ</button>
+      </div>
+    </fieldset>
+    <fieldset id="chat">
+      <legend>チャット入力画面</legend>
+      <div>
+        名前: <input type="text" id="name">
+      </div>
+      <div>
+        発言:<p>　　　<textarea id="text"></textarea></p>
+      </div>
+      <div style="text-align: right;">
+        <button type="button" id="send">送信（Ctrl+Enter）</button>
+      </div>
+    </fieldset>
+  </form>
+  <style>
+    #text{display: inline-block; width: 90%; height: 6em; padding: 10px; border: 1px solid #999;
+        box-sizing: border-box; background: #f2f2f2; margin: 0.5em 0; line-height: 1.5;}
+  </style>
+  <!-- データ出力場所 -->
+  <ul id="output" style="background: #ccc;"></ul>
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script>
+  <script>
+    // 日時をいい感じの形式にする関数
+    function convertTimestampToDatetime(timestamp) {
+      const _d = timestamp ? new Date(timestamp * 1000) : new Date();
+      const Y = _d.getFullYear();
+      const m = (_d.getMonth() + 1).toString().padStart(2, '0');
+      const d = _d.getDate().toString().padStart(2, '0');
+      const H = _d.getHours().toString().padStart(2, '0');
+      const i = _d.getMinutes().toString().padStart(2, '0');
+      const s = _d.getSeconds().toString().padStart(2, '0');
+      return `${Y}/${m}/${d} ${H}:${i}:${s}`;
+    }
+  </script>
+  <!-- 以下にfirebaseのコードを貼り付けよう -->
+  <script type="module">
+    // 必要な機能を必要なSDKからインポートする
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-analytics.js";
+      // TODO: 使いたいFirebase製品のSDKを追加する。
+      // https://firebase.google.com/docs/web/setup#available-libraries
+      // ウェブアプリのFirebaseの設定
+      // Firebase JS SDK v7.20.0以降の場合、measurementIdはオプションです。
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      serverTimestamp,
+      query,
+      orderBy,
+      onSnapshot,
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+    import {//Firebase AuthenticationのSDKをインポート
+        getAuth,
+        createUserWithEmailAndPassword,
+        signInWithEmailAndPassword,
+        onAuthStateChanged,
+        signOut
+    } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyBvs0qH3LKS-DQTBw-3muvsqoR8xrzm_oU",
+        authDomain: "chat-app-f21.firebaseapp.com",
+        projectId: "chat-app-f21",
+        storageBucket: "chat-app-f21.appspot.com",
+        messagingSenderId: "305901782191",
+        appId: "1:305901782191:web:bb78e2727b30e9ee58405a",
+        measurementId: "G-CJ0FKFGW1B"
+    };
+
+    // Firebaseの初期化
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);//認証
+    const analytics = getAnalytics(app);
+    const db = getFirestore(app);
+    const q = query(collection(db, "chat"), orderBy("time", "desc"));
+    // データ取得処理
+    onSnapshot(q, (querySnapshot) => {
+      console.log(querySnapshot.docs);
+      const documents = [];
+      querySnapshot.docs.forEach(function (doc) {
+        const documentData = doc.data();
+        if (documentData.time) {
+          const document = {
+            id: doc.id,
+            data: documentData,
+          };
+          documents.push(document);
+        }
+      });
+      console.log(documents);
+      //会話履歴出力
+      const htmlElements = [];
+      documents.forEach(function (document) {
+        htmlElements.push(`
+          <li id="${document.id}">
+            <p>${
+              document.data.name
+            } at ${convertTimestampToDatetime(document.data.time.seconds)}</p>
+            <p>${document.data.text}</p>
+          </li>
+        `);
+      });
+      $("#output").html(htmlElements);
+    });
+    // 送信時に必要な処理
+    $("#send").on("click", function() {
+      sendMessage();
+    });
+    //キー入力判定
+    $("#text").on("keydown", function(e) {
+      const key = e.keyCode || e.which;
+      if (key === 13 && e.ctrlKey) {
+        sendMessage();
+      }
+    });
+
+    function sendMessage() {
+      const name = $("#name").val();
+      const text = $("#text").val();
+      if (name.length === 0) {
+        alert("名前がありません。");
+      } else if (text.length === 0) {
+        alert("内容がありません。");
+      } else {
+        // ログインユーザーを取得
+        const user = auth.currentUser;
+        const email = user ? user.email : "";
+        // Firestoreのコレクションにデータを追加
+        const postData = {
+          name: name,
+          text: text,
+          time: serverTimestamp(),
+        };
+        addDoc(collection(db, "chat"), postData);
+        $("#text").val("");
+      }
+    }
+    // ユーザー登録
+    $("#register").on("click", async function () {
+      const email = $("#email").val();
+      const password = $("#password").val();
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        console.log("Registered user:", user);
+        alert("ユーザー登録に成功しました。");
+        // ユーザーデータをFirestoreに保存
+        await addDoc(collection(db, "users"), { email: user.email, name: $("#name").val() });
+      } catch (error) {
+        const errorCode = error.code;
+        const errorMessage = error.message;
+        console.error("Registration error:", errorCode, errorMessage);
+        alert("ユーザー登録に失敗しました。");
+      }
+    });
+    //ログイン
+    $("#login").on("click", function () {
+      const email = $("#email").val();
+      const password = $("#password").val();
+      signInWithEmailAndPassword(auth, email, password)
+        .then((userCredential) => {          // ログイン成功時の処理
+          const user = userCredential.user;
+          console.log("Logged in user:", user);
+          alert("ログインしました。");
+        })
+
+        .catch((error) => {          // ログイン失敗時の処理
+          const errorCode = error.code;
+          const errorMessage = error.message;
+          console.error("Login error:", errorCode, errorMessage);
+          alert("アカウント情報が合致しません。");
+        });
+    });
+    //ログアウト
+    $("#logout").on("click", function () {
+      signOut(auth)
+        .then(() => { console.log("User logged out"); })  // ログアウト完了時の処理
+        .catch((error) => { console.error("Logout error:", error);
+          alert("ログアウトできません。"); });// ログアウト失敗時の処理
+    });
+    // ログイン状態の監視
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // ユーザーがログインしている場合
+        $("#chat").prop("disabled", false); // フォームを有効化するなどの処理を行う
+        $("#email").prop("disabled", true);
+        $("#password").prop("disabled", true);
+        document.getElementById("output").style.display = "block";
+      } else {
+        // ユーザーがログインしていない場合
+        $("#chat").prop("disabled", true); // フォームを無効化するなどの処理を行う
+        $("#email").prop("disabled", false);
+        $("#password").prop("disabled", false);
+        document.getElementById("output").style.display = "none";
+        alert("投稿するにはログインしてください。");
+      }
+    });
+  </script>
+</body>
+
+</html>
